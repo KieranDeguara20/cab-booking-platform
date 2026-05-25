@@ -81,6 +81,67 @@ customerSchema.methods.toSafeProfile = function toSafeProfile() {
 
 const Customer = mongoose.model("Customer", customerSchema);
 
+const bookingSchema = new mongoose.Schema(
+  {
+    customerId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Customer",
+      required: true,
+      index: true,
+    },
+    startingLocation: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+    endingLocation: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+    bookingDateTime: {
+      type: Date,
+      required: true,
+    },
+    passengers: {
+      type: Number,
+      required: true,
+      min: 1,
+      max: 8,
+    },
+    cabType: {
+      type: String,
+      enum: ["Economic", "Premium", "Executive"],
+      required: true,
+    },
+    status: {
+      type: String,
+      enum: ["confirmed", "cancelled"],
+      default: "confirmed",
+    },
+  },
+  {
+    timestamps: true,
+  }
+);
+
+bookingSchema.methods.toBookingDetails = function toBookingDetails() {
+  return {
+    id: this._id,
+    customerId: this.customerId,
+    startingLocation: this.startingLocation,
+    endingLocation: this.endingLocation,
+    bookingDateTime: this.bookingDateTime,
+    passengers: this.passengers,
+    cabType: this.cabType,
+    status: this.status,
+    createdAt: this.createdAt,
+    updatedAt: this.updatedAt,
+  };
+};
+
+const Booking = mongoose.model("Booking", bookingSchema);
+
 function createToken(customer) {
   return jwt.sign(
     {
@@ -247,7 +308,6 @@ app.patch("/api/customers/me/notifications/:notificationId/read", authenticateCu
   });
 });
 
-// Other microservices can call this endpoint to add ride or discount messages.
 app.post("/api/customers/:customerId/notifications", async (req, res) => {
   try {
     const { title, message, type } = req.body;
@@ -284,6 +344,125 @@ app.post("/api/customers/:customerId/notifications", async (req, res) => {
   }
 });
 
+app.post("/api/bookings", authenticateCustomer, async (req, res) => {
+  try {
+    const {
+      startingLocation,
+      endingLocation,
+      bookingDateTime,
+      passengers,
+      cabType,
+    } = req.body;
+
+    if (!startingLocation || !endingLocation || !bookingDateTime || !passengers || !cabType) {
+      return res.status(400).json({
+        message:
+          "Starting location, ending location, date and time, passengers and cab type are required.",
+      });
+    }
+
+    const parsedDateTime = new Date(bookingDateTime);
+
+    if (Number.isNaN(parsedDateTime.getTime())) {
+      return res.status(400).json({
+        message: "Booking date and time must be a valid date.",
+      });
+    }
+
+    const passengerCount = Number(passengers);
+
+    if (!Number.isInteger(passengerCount) || passengerCount < 1 || passengerCount > 8) {
+      return res.status(400).json({
+        message: "Passengers must be a whole number between 1 and 8.",
+      });
+    }
+
+    if (!["Economic", "Premium", "Executive"].includes(cabType)) {
+      return res.status(400).json({
+        message: "Cab type must be Economic, Premium or Executive.",
+      });
+    }
+
+    const booking = await Booking.create({
+      customerId: req.customer._id,
+      startingLocation,
+      endingLocation,
+      bookingDateTime: parsedDateTime,
+      passengers: passengerCount,
+      cabType,
+    });
+
+    return res.status(201).json({
+      message: "Cab booking confirmed successfully.",
+      booking: booking.toBookingDetails(),
+    });
+  } catch (error) {
+    return res.status(500).json({
+      message: "Could not create cab booking.",
+      error: error.message,
+    });
+  }
+});
+
+app.get("/api/bookings/current", authenticateCustomer, async (req, res) => {
+  try {
+    const bookings = await Booking.find({
+      customerId: req.customer._id,
+      bookingDateTime: { $gte: new Date() },
+      status: "confirmed",
+    }).sort({ bookingDateTime: 1 });
+
+    return res.json({
+      bookings: bookings.map((booking) => booking.toBookingDetails()),
+    });
+  } catch (error) {
+    return res.status(500).json({
+      message: "Could not retrieve current cab bookings.",
+      error: error.message,
+    });
+  }
+});
+
+app.get("/api/bookings/past", authenticateCustomer, async (req, res) => {
+  try {
+    const bookings = await Booking.find({
+      customerId: req.customer._id,
+      bookingDateTime: { $lt: new Date() },
+    }).sort({ bookingDateTime: -1 });
+
+    return res.json({
+      bookings: bookings.map((booking) => booking.toBookingDetails()),
+    });
+  } catch (error) {
+    return res.status(500).json({
+      message: "Could not retrieve past cab bookings.",
+      error: error.message,
+    });
+  }
+});
+
+app.get("/api/bookings/:bookingId", authenticateCustomer, async (req, res) => {
+  try {
+    const booking = await Booking.findOne({
+      _id: req.params.bookingId,
+      customerId: req.customer._id,
+    });
+
+    if (!booking) {
+      return res.status(404).json({ message: "Booking not found." });
+    }
+
+    return res.json({
+      booking: booking.toBookingDetails(),
+    });
+  } catch (error) {
+    return res.status(500).json({
+      message: "Could not retrieve cab booking.",
+      error: error.message,
+    });
+  }
+});
+
 async function startServer() {
   if (!process.env.MONGODB_URI) {
     throw new Error("MONGODB_URI is missing. Add it to your .env file.");
@@ -296,11 +475,11 @@ async function startServer() {
   await mongoose.connect(process.env.MONGODB_URI);
 
   app.listen(PORT, () => {
-    console.log(`Customer microservice running on port ${PORT}`);
+    console.log(`Cab booking platform services running on port ${PORT}`);
   });
 }
 
 startServer().catch((error) => {
-  console.error("Failed to start customer microservice:", error.message);
+  console.error("Failed to start cab booking platform services:", error.message);
   process.exit(1);
 });
