@@ -119,6 +119,11 @@ const bookingSchema = new mongoose.Schema(
       enum: ["confirmed", "cancelled"],
       default: "confirmed",
     },
+    paymentStatus: {
+      type: String,
+      enum: ["unpaid", "paid"],
+      default: "unpaid",
+    },
   },
   {
     timestamps: true,
@@ -135,12 +140,122 @@ bookingSchema.methods.toBookingDetails = function toBookingDetails() {
     passengers: this.passengers,
     cabType: this.cabType,
     status: this.status,
+    paymentStatus: this.paymentStatus,
     createdAt: this.createdAt,
     updatedAt: this.updatedAt,
   };
 };
 
 const Booking = mongoose.model("Booking", bookingSchema);
+
+const paymentSchema = new mongoose.Schema(
+  {
+    customerId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Customer",
+      required: true,
+      index: true,
+    },
+    bookingId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Booking",
+      required: true,
+      index: true,
+    },
+    cabFare: {
+      type: Number,
+      required: true,
+    },
+    cabMultiplier: {
+      type: Number,
+      required: true,
+    },
+    daytimeMultiplier: {
+      type: Number,
+      required: true,
+    },
+    passengersMultiplier: {
+      type: Number,
+      required: true,
+    },
+    discountMultiplier: {
+      type: Number,
+      required: true,
+      default: 1,
+    },
+    totalPrice: {
+      type: Number,
+      required: true,
+    },
+    currency: {
+      type: String,
+      default: "EUR",
+    },
+    fareSource: {
+      type: String,
+      enum: ["external-api", "demo-fallback"],
+      required: true,
+    },
+    paymentMethod: {
+      type: String,
+      enum: ["card", "cash", "wallet"],
+      default: "card",
+    },
+    status: {
+      type: String,
+      enum: ["successful", "failed"],
+      default: "successful",
+    },
+    auditTrail: [
+      {
+        action: {
+          type: String,
+          required: true,
+        },
+        message: {
+          type: String,
+          required: true,
+        },
+        createdAt: {
+          type: Date,
+          default: Date.now,
+        },
+      },
+    ],
+  },
+  {
+    timestamps: true,
+  }
+);
+
+paymentSchema.methods.toPaymentDetails = function toPaymentDetails() {
+  return {
+    id: this._id,
+    customerId: this.customerId,
+    bookingId: this.bookingId,
+    cabFare: this.cabFare,
+    cabMultiplier: this.cabMultiplier,
+    daytimeMultiplier: this.daytimeMultiplier,
+    passengersMultiplier: this.passengersMultiplier,
+    discountMultiplier: this.discountMultiplier,
+    totalPrice: this.totalPrice,
+    currency: this.currency,
+    fareSource: this.fareSource,
+    paymentMethod: this.paymentMethod,
+    status: this.status,
+    auditTrail: this.auditTrail,
+    createdAt: this.createdAt,
+    updatedAt: this.updatedAt,
+  };
+};
+
+const Payment = mongoose.model("Payment", paymentSchema);
+
+const CAB_MULTIPLIERS = {
+  Economic: 1,
+  Premium: 1.2,
+  Executive: 1.4,
+};
 
 function createToken(customer) {
   return jwt.sign(
@@ -176,6 +291,72 @@ async function authenticateCustomer(req, res, next) {
   } catch (error) {
     return res.status(401).json({ message: "Invalid or expired authentication token." });
   }
+}
+
+function roundMoney(value) {
+  return Math.round((value + Number.EPSILON) * 100) / 100;
+}
+
+function getDaytimeMultiplier(bookingDateTime) {
+  const hour = bookingDateTime.getHours();
+  return hour >= 0 && hour < 8 ? 1.2 : 1;
+}
+
+function getPassengersMultiplier(passengers) {
+  if (passengers >= 1 && passengers <= 4) {
+    return 1;
+  }
+
+  if (passengers >= 5 && passengers <= 8) {
+    return 2;
+  }
+
+  return null;
+}
+
+async function getCabFareFromExternalApi(booking) {
+  if (!process.env.TAXI_FARE_API_URL || !process.env.RAPIDAPI_KEY) {
+    return {
+      fare: 15,
+      source: "demo-fallback",
+    };
+  }
+
+  const url = new URL(process.env.TAXI_FARE_API_URL);
+  url.searchParams.set("start", booking.startingLocation);
+  url.searchParams.set("end", booking.endingLocation);
+
+  const response = await fetch(url, {
+    headers: {
+      "X-RapidAPI-Key": process.env.RAPIDAPI_KEY,
+      "X-RapidAPI-Host": process.env.RAPIDAPI_HOST || url.hostname,
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error("Taxi fare API request failed.");
+  }
+
+  const data = await response.json();
+  const fare = Number(data.fare || data.total_fare || data.estimated_fare || data.price);
+
+  if (!Number.isFinite(fare) || fare <= 0) {
+    throw new Error("Taxi fare API response did not include a valid fare.");
+  }
+
+  return {
+    fare,
+    source: "external-api",
+  };
+}
+
+async function customerCanUseDiscount(customerId) {
+  const successfulPayments = await Payment.countDocuments({
+    customerId,
+    status: "successful",
+  });
+
+  return successfulPayments >= 3;
 }
 
 app.get("/health", (req, res) => {
@@ -458,6 +639,184 @@ app.get("/api/bookings/:bookingId", authenticateCustomer, async (req, res) => {
   } catch (error) {
     return res.status(500).json({
       message: "Could not retrieve cab booking.",
+      error: error.message,
+    });
+  }
+});
+
+app.post("/api/payments", authenticateCustomer, async (req, res) => {
+  try {
+    const { bookingId, paymentMethod, applyDiscount } = req.body;
+
+    if (!bookingId) {
+      return res.status(400).json({
+        message: "Booking ID is required.",
+      });
+    }
+
+    if (paymentMethod && !["card", "cash", "wallet"].includes(paymentMethod)) {
+      return res.status(400).json({
+        message: "Payment method must be card, cash or wallet.",
+      });
+    }
+
+    const booking = await Booking.findOne({
+      _id: bookingId,
+      customerId: req.customer._id,
+    });
+
+    if (!booking) {
+      return res.status(404).json({
+        message: "Booking not found.",
+      });
+    }
+
+    if (booking.status !== "confirmed") {
+      return res.status(400).json({
+        message: "Only confirmed bookings can be paid.",
+      });
+    }
+
+    const existingPayment = await Payment.findOne({
+      bookingId: booking._id,
+      customerId: req.customer._id,
+      status: "successful",
+    });
+
+    if (existingPayment) {
+      return res.status(409).json({
+        message: "This booking has already been paid.",
+        payment: existingPayment.toPaymentDetails(),
+      });
+    }
+
+    const passengersMultiplier = getPassengersMultiplier(booking.passengers);
+
+    if (!passengersMultiplier) {
+      return res.status(400).json({
+        message: "Bookings with more than 8 passengers are not allowed.",
+      });
+    }
+
+    const discountAllowed = await customerCanUseDiscount(req.customer._id);
+
+    if (applyDiscount && !discountAllowed) {
+      return res.status(400).json({
+        message: "Discount is only available after three successful bookings.",
+      });
+    }
+
+    const fareResult = await getCabFareFromExternalApi(booking);
+    const cabMultiplier = CAB_MULTIPLIERS[booking.cabType];
+    const daytimeMultiplier = getDaytimeMultiplier(booking.bookingDateTime);
+    const discountMultiplier = applyDiscount ? 0.9 : 1;
+    const totalPrice = roundMoney(
+      fareResult.fare *
+        cabMultiplier *
+        daytimeMultiplier *
+        passengersMultiplier *
+        discountMultiplier
+    );
+
+    const payment = await Payment.create({
+      customerId: req.customer._id,
+      bookingId: booking._id,
+      cabFare: fareResult.fare,
+      cabMultiplier,
+      daytimeMultiplier,
+      passengersMultiplier,
+      discountMultiplier,
+      totalPrice,
+      fareSource: fareResult.source,
+      paymentMethod: paymentMethod || "card",
+      auditTrail: [
+        {
+          action: "fare-calculated",
+          message: `Fare calculated using ${fareResult.source}.`,
+        },
+        {
+          action: "payment-successful",
+          message: "Payment was processed and stored successfully.",
+        },
+      ],
+    });
+
+    booking.paymentStatus = "paid";
+    await booking.save();
+
+    return res.status(201).json({
+      message: "Payment processed successfully.",
+      payment: payment.toPaymentDetails(),
+      booking: booking.toBookingDetails(),
+    });
+  } catch (error) {
+    return res.status(500).json({
+      message: "Could not process payment.",
+      error: error.message,
+    });
+  }
+});
+
+app.get("/api/payments", authenticateCustomer, async (req, res) => {
+  try {
+    const payments = await Payment.find({
+      customerId: req.customer._id,
+    }).sort({ createdAt: -1 });
+
+    return res.json({
+      payments: payments.map((payment) => payment.toPaymentDetails()),
+    });
+  } catch (error) {
+    return res.status(500).json({
+      message: "Could not retrieve payments.",
+      error: error.message,
+    });
+  }
+});
+
+app.get("/api/payments/booking/:bookingId", authenticateCustomer, async (req, res) => {
+  try {
+    const payment = await Payment.findOne({
+      bookingId: req.params.bookingId,
+      customerId: req.customer._id,
+    }).sort({ createdAt: -1 });
+
+    if (!payment) {
+      return res.status(404).json({
+        message: "Payment not found for this booking.",
+      });
+    }
+
+    return res.json({
+      payment: payment.toPaymentDetails(),
+    });
+  } catch (error) {
+    return res.status(500).json({
+      message: "Could not retrieve payment details.",
+      error: error.message,
+    });
+  }
+});
+
+app.get("/api/payments/:paymentId", authenticateCustomer, async (req, res) => {
+  try {
+    const payment = await Payment.findOne({
+      _id: req.params.paymentId,
+      customerId: req.customer._id,
+    });
+
+    if (!payment) {
+      return res.status(404).json({
+        message: "Payment not found.",
+      });
+    }
+
+    return res.json({
+      payment: payment.toPaymentDetails(),
+    });
+  } catch (error) {
+    return res.status(500).json({
+      message: "Could not retrieve payment details.",
       error: error.message,
     });
   }
