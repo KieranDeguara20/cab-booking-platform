@@ -251,6 +251,59 @@ paymentSchema.methods.toPaymentDetails = function toPaymentDetails() {
 
 const Payment = mongoose.model("Payment", paymentSchema);
 
+const favouriteLocationSchema = new mongoose.Schema(
+  {
+    customerId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Customer",
+      required: true,
+      index: true,
+    },
+    label: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+    address: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+    city: {
+      type: String,
+      trim: true,
+    },
+    country: {
+      type: String,
+      trim: true,
+      default: "Malta",
+    },
+    notes: {
+      type: String,
+      trim: true,
+    },
+  },
+  {
+    timestamps: true,
+  }
+);
+
+favouriteLocationSchema.methods.toLocationDetails = function toLocationDetails() {
+  return {
+    id: this._id,
+    customerId: this.customerId,
+    label: this.label,
+    address: this.address,
+    city: this.city,
+    country: this.country,
+    notes: this.notes,
+    createdAt: this.createdAt,
+    updatedAt: this.updatedAt,
+  };
+};
+
+const FavouriteLocation = mongoose.model("FavouriteLocation", favouriteLocationSchema);
+
 const CAB_MULTIPLIERS = {
   Economic: 1,
   Premium: 1.2,
@@ -357,6 +410,78 @@ async function customerCanUseDiscount(customerId) {
   });
 
   return successfulPayments >= 3;
+}
+
+function buildLocationQuery(location) {
+  return [location.address, location.city, location.country].filter(Boolean).join(", ");
+}
+
+function createDemoWeatherForecast(location) {
+  return {
+    source: "demo-fallback",
+    location: buildLocationQuery(location),
+    current: {
+      condition: "Partly cloudy",
+      temperatureC: 22,
+      windKph: 14,
+      humidity: 65,
+    },
+    forecast: [
+      {
+        date: new Date().toISOString().slice(0, 10),
+        condition: "Partly cloudy",
+        minTempC: 18,
+        maxTempC: 24,
+        chanceOfRain: 20,
+      },
+    ],
+  };
+}
+
+async function getWeatherForecastForLocation(location) {
+  if (!process.env.WEATHER_API_URL || !process.env.RAPIDAPI_KEY) {
+    return createDemoWeatherForecast(location);
+  }
+
+  const url = new URL(process.env.WEATHER_API_URL);
+  url.searchParams.set("q", buildLocationQuery(location));
+  url.searchParams.set("days", "1");
+
+  const response = await fetch(url, {
+    headers: {
+      "X-RapidAPI-Key": process.env.RAPIDAPI_KEY,
+      "X-RapidAPI-Host": process.env.WEATHER_RAPIDAPI_HOST || url.hostname,
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error("Weather API request failed.");
+  }
+
+  const data = await response.json();
+  const forecastDay = data.forecast?.forecastday?.[0];
+
+  return {
+    source: "external-api",
+    location: data.location?.name || buildLocationQuery(location),
+    current: {
+      condition: data.current?.condition?.text,
+      temperatureC: data.current?.temp_c,
+      windKph: data.current?.wind_kph,
+      humidity: data.current?.humidity,
+    },
+    forecast: forecastDay
+      ? [
+          {
+            date: forecastDay.date,
+            condition: forecastDay.day?.condition?.text,
+            minTempC: forecastDay.day?.mintemp_c,
+            maxTempC: forecastDay.day?.maxtemp_c,
+            chanceOfRain: forecastDay.day?.daily_chance_of_rain,
+          },
+        ]
+      : [],
+  };
 }
 
 app.get("/health", (req, res) => {
@@ -817,6 +942,184 @@ app.get("/api/payments/:paymentId", authenticateCustomer, async (req, res) => {
   } catch (error) {
     return res.status(500).json({
       message: "Could not retrieve payment details.",
+      error: error.message,
+    });
+  }
+});
+
+app.post("/api/locations", authenticateCustomer, async (req, res) => {
+  try {
+    const { label, address, city, country, notes } = req.body;
+
+    if (!label || !address) {
+      return res.status(400).json({
+        message: "Location label and address are required.",
+      });
+    }
+
+    const location = await FavouriteLocation.create({
+      customerId: req.customer._id,
+      label,
+      address,
+      city,
+      country: country || "Malta",
+      notes,
+    });
+
+    return res.status(201).json({
+      message: "Favourite pickup location added successfully.",
+      location: location.toLocationDetails(),
+    });
+  } catch (error) {
+    return res.status(500).json({
+      message: "Could not add favourite pickup location.",
+      error: error.message,
+    });
+  }
+});
+
+app.get("/api/locations", authenticateCustomer, async (req, res) => {
+  try {
+    const locations = await FavouriteLocation.find({
+      customerId: req.customer._id,
+    }).sort({ createdAt: -1 });
+
+    return res.json({
+      locations: locations.map((location) => location.toLocationDetails()),
+    });
+  } catch (error) {
+    return res.status(500).json({
+      message: "Could not retrieve favourite pickup locations.",
+      error: error.message,
+    });
+  }
+});
+
+app.get("/api/locations/:locationId/weather", authenticateCustomer, async (req, res) => {
+  try {
+    const location = await FavouriteLocation.findOne({
+      _id: req.params.locationId,
+      customerId: req.customer._id,
+    });
+
+    if (!location) {
+      return res.status(404).json({
+        message: "Favourite pickup location not found.",
+      });
+    }
+
+    const weather = await getWeatherForecastForLocation(location);
+
+    return res.json({
+      location: location.toLocationDetails(),
+      weather,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      message: "Could not retrieve weather forecast.",
+      error: error.message,
+    });
+  }
+});
+
+app.get("/api/locations/:locationId", authenticateCustomer, async (req, res) => {
+  try {
+    const location = await FavouriteLocation.findOne({
+      _id: req.params.locationId,
+      customerId: req.customer._id,
+    });
+
+    if (!location) {
+      return res.status(404).json({
+        message: "Favourite pickup location not found.",
+      });
+    }
+
+    return res.json({
+      location: location.toLocationDetails(),
+    });
+  } catch (error) {
+    return res.status(500).json({
+      message: "Could not retrieve favourite pickup location.",
+      error: error.message,
+    });
+  }
+});
+
+app.put("/api/locations/:locationId", authenticateCustomer, async (req, res) => {
+  try {
+    const { label, address, city, country, notes } = req.body;
+    const location = await FavouriteLocation.findOne({
+      _id: req.params.locationId,
+      customerId: req.customer._id,
+    });
+
+    if (!location) {
+      return res.status(404).json({
+        message: "Favourite pickup location not found.",
+      });
+    }
+
+    if (label !== undefined) {
+      location.label = label;
+    }
+
+    if (address !== undefined) {
+      location.address = address;
+    }
+
+    if (city !== undefined) {
+      location.city = city;
+    }
+
+    if (country !== undefined) {
+      location.country = country;
+    }
+
+    if (notes !== undefined) {
+      location.notes = notes;
+    }
+
+    if (!location.label || !location.address) {
+      return res.status(400).json({
+        message: "Location label and address cannot be empty.",
+      });
+    }
+
+    await location.save();
+
+    return res.json({
+      message: "Favourite pickup location updated successfully.",
+      location: location.toLocationDetails(),
+    });
+  } catch (error) {
+    return res.status(500).json({
+      message: "Could not update favourite pickup location.",
+      error: error.message,
+    });
+  }
+});
+
+app.delete("/api/locations/:locationId", authenticateCustomer, async (req, res) => {
+  try {
+    const location = await FavouriteLocation.findOneAndDelete({
+      _id: req.params.locationId,
+      customerId: req.customer._id,
+    });
+
+    if (!location) {
+      return res.status(404).json({
+        message: "Favourite pickup location not found.",
+      });
+    }
+
+    return res.json({
+      message: "Favourite pickup location removed successfully.",
+      location: location.toLocationDetails(),
+    });
+  } catch (error) {
+    return res.status(500).json({
+      message: "Could not remove favourite pickup location.",
       error: error.message,
     });
   }
