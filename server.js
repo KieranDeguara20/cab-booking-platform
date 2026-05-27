@@ -448,6 +448,33 @@ async function notifyDiscountAvailable(customerId) {
   return customer.notifications[customer.notifications.length - 1];
 }
 
+function scheduleCabReadyNotification(booking) {
+  const delayMilliseconds = 3 * 60 * 1000;
+
+  setTimeout(async () => {
+    try {
+      const customer = await Customer.findById(booking.customerId);
+
+      if (!customer) {
+        return;
+      }
+
+      customer.notifications.push({
+        title: "Cab ready for pickup",
+        message:
+          `Your ${booking.cabType} cab from ${booking.startingLocation} to ` +
+          `${booking.endingLocation} is ready for ${booking.passengers} passenger(s) ` +
+          `at ${booking.bookingDateTime.toISOString()}.`,
+        type: "ride",
+      });
+
+      await customer.save();
+    } catch (error) {
+      console.error("Cab ready notification event failed:", error.message);
+    }
+  }, delayMilliseconds);
+}
+
 function buildLocationQuery(location) {
   return [location.address, location.city, location.country].filter(Boolean).join(", ");
 }
@@ -734,9 +761,12 @@ app.post("/api/bookings", authenticateCustomer, async (req, res) => {
       cabType,
     });
 
+    scheduleCabReadyNotification(booking);
+
     return res.status(201).json({
       message: "Cab booking confirmed successfully.",
       booking: booking.toBookingDetails(),
+      cabReadyNotificationScheduled: true,
     });
   } catch (error) {
     return res.status(500).json({
