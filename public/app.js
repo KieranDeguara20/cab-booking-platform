@@ -214,11 +214,12 @@ document.querySelectorAll(".tab").forEach((tab) => {
 
 document.querySelector("#registerForm").addEventListener("submit", async (event) => {
   event.preventDefault();
+  const form = event.currentTarget;
 
   try {
     const data = await gateway("/customers/register", {
       method: "POST",
-      body: formDataToObject(event.currentTarget),
+      body: formDataToObject(form),
     });
     state.token = data.token;
     state.customer = data.customer;
@@ -233,11 +234,12 @@ document.querySelector("#registerForm").addEventListener("submit", async (event)
 
 document.querySelector("#loginForm").addEventListener("submit", async (event) => {
   event.preventDefault();
+  const form = event.currentTarget;
 
   try {
     const data = await gateway("/customers/login", {
       method: "POST",
-      body: formDataToObject(event.currentTarget),
+      body: formDataToObject(form),
     });
     state.token = data.token;
     state.customer = data.customer;
@@ -264,13 +266,14 @@ document.querySelector("#loadProfileButton").addEventListener("click", () => {
 
 document.querySelector("#bookingForm").addEventListener("submit", async (event) => {
   event.preventDefault();
-  const body = formDataToObject(event.currentTarget);
+  const form = event.currentTarget;
+  const body = formDataToObject(form);
   body.bookingDateTime = new Date(body.bookingDateTime).toISOString();
   body.passengers = Number(body.passengers);
 
   try {
     await gateway("/bookings", { method: "POST", body });
-    event.currentTarget.reset();
+    form.reset();
     showMessage("Booking created.");
     await loadBookings("current");
   } catch (error) {
@@ -288,13 +291,14 @@ document.querySelector("#loadPastBookingsButton").addEventListener("click", () =
 
 document.querySelector("#paymentForm").addEventListener("submit", async (event) => {
   event.preventDefault();
+  const form = event.currentTarget;
 
   try {
     await gateway("/payments", {
       method: "POST",
-      body: formDataToObject(event.currentTarget),
+      body: formDataToObject(form),
     });
-    event.currentTarget.reset();
+    form.reset();
     showMessage("Payment processed.");
     await loadPayments();
   } catch (error) {
