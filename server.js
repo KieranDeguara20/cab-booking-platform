@@ -5,12 +5,50 @@ const mongoose = require("mongoose");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const cors = require("cors");
+const path = require("path");
 
 const app = express();
 const PORT = process.env.PORT || 3001;
 
 app.use(cors());
 app.use(express.json());
+app.use(express.static(path.join(__dirname, "public")));
+
+app.use("/api/gateway", async (req, res) => {
+  try {
+    const targetPath = req.originalUrl.replace("/api/gateway", "/api");
+    const targetUrl = `http://127.0.0.1:${PORT}${targetPath}`;
+    const headers = {
+      "Content-Type": "application/json",
+    };
+
+    if (req.headers.authorization) {
+      headers.Authorization = req.headers.authorization;
+    }
+
+    const response = await fetch(targetUrl, {
+      method: req.method,
+      headers,
+      body: ["GET", "HEAD"].includes(req.method) ? undefined : JSON.stringify(req.body || {}),
+    });
+    const contentType = response.headers.get("content-type") || "";
+    const payload = contentType.includes("application/json")
+      ? await response.json()
+      : await response.text();
+
+    return res.status(response.status).json({
+      gateway: "cab-booking-gateway",
+      target: targetPath,
+      data: payload,
+    });
+  } catch (error) {
+    return res.status(502).json({
+      gateway: "cab-booking-gateway",
+      message: "Gateway could not forward the request.",
+      error: error.message,
+    });
+  }
+});
 
 const customerSchema = new mongoose.Schema(
   {

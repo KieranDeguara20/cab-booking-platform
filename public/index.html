@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Cab Booking Platform</title>
+    <link rel="stylesheet" href="/styles.css">
+  </head>
+  <body>
+    <header class="app-header">
+      <div class="brand">
+        <div>
+          <h1>Cab Booking Platform</h1>
+        </div>
+      </div>
+      <div class="session">
+        <span id="sessionStatus">Signed out</span>
+        <button id="logoutButton" class="secondary" type="button">Logout</button>
+      </div>
+    </header>
+
+    <main class="layout">
+      <nav class="tabs" aria-label="Application sections">
+        <button class="tab active" data-panel="accountPanel" type="button">Account</button>
+        <button class="tab" data-panel="bookingPanel" type="button">Bookings</button>
+        <button class="tab" data-panel="paymentPanel" type="button">Payments</button>
+        <button class="tab" data-panel="locationPanel" type="button">Locations</button>
+        <button class="tab" data-panel="inboxPanel" type="button">Inbox</button>
+      </nav>
+
+      <section id="accountPanel" class="panel active">
+        <div class="grid two">
+          <form id="registerForm" class="card">
+            <h2>Register</h2>
+            <label>First name<input name="firstName" required></label>
+            <label>Surname<input name="surname" required></label>
+            <label>Email<input name="email" type="email" required></label>
+            <label>Password<input name="password" type="password" minlength="6" required></label>
+            <button type="submit">Create account</button>
+          </form>
+
+          <form id="loginForm" class="card">
+            <h2>Login</h2>
+            <label>Email<input name="email" type="email" required></label>
+            <label>Password<input name="password" type="password" required></label>
+            <button type="submit">Login</button>
+          </form>
+        </div>
+        <section class="card">
+          <div class="card-title">
+            <h2>Customer details</h2>
+            <button id="loadProfileButton" class="secondary" type="button">Refresh</button>
+          </div>
+          <pre id="profileOutput">No customer loaded.</pre>
+        </section>
+      </section>
+
+      <section id="bookingPanel" class="panel">
+        <div class="grid two">
+          <form id="bookingForm" class="card">
+            <h2>Create booking</h2>
+            <label>Starting location<input name="startingLocation" required></label>
+            <label>Ending location<input name="endingLocation" required></label>
+            <label>Date and time<input name="bookingDateTime" type="datetime-local" required></label>
+            <label>Passengers<input name="passengers" type="number" min="1" max="8" value="1" required></label>
+            <label>Cab type
+              <select name="cabType">
+                <option>Economic</option>
+                <option>Premium</option>
+                <option>Executive</option>
+              </select>
+            </label>
+            <button type="submit">Confirm booking</button>
+          </form>
+
+          <section class="card">
+            <div class="card-title">
+              <h2>Bookings</h2>
+              <div class="actions">
+                <button id="loadCurrentBookingsButton" class="secondary" type="button">Current</button>
+                <button id="loadPastBookingsButton" class="secondary" type="button">Past</button>
+              </div>
+            </div>
+            <div id="bookingsList" class="list"></div>
+          </section>
+        </div>
+      </section>
+
+      <section id="paymentPanel" class="panel">
+        <div class="grid two">
+          <form id="paymentForm" class="card">
+            <h2>Pay booking</h2>
+            <label>Booking ID<input name="bookingId" required></label>
+            <label>Payment method
+              <select name="paymentMethod">
+                <option>card</option>
+                <option>cash</option>
+                <option>wallet</option>
+              </select>
+            </label>
+            <label class="checkbox"><input name="applyDiscount" type="checkbox"> Apply discount</label>
+            <button type="submit">Pay</button>
+          </form>
+
+          <section class="card">
+            <div class="card-title">
+              <h2>Payments</h2>
+              <button id="loadPaymentsButton" class="secondary" type="button">Refresh</button>
+            </div>
+            <div id="paymentsList" class="list"></div>
+          </section>
+        </div>
+      </section>
+
+      <section id="locationPanel" class="panel">
+        <div class="grid two">
+          <form id="locationForm" class="card">
+            <h2>Favourite pickup location</h2>
+            <input name="locationId" type="hidden">
+            <label>Label<input name="label" required></label>
+            <label>Address<input name="address" required></label>
+            <label>City<input name="city"></label>
+            <label>Country<input name="country" value="Malta"></label>
+            <label>Notes<input name="notes"></label>
+            <button type="submit">Save location</button>
+          </form>
+
+          <section class="card">
+            <div class="card-title">
+              <h2>Locations</h2>
+              <button id="loadLocationsButton" class="secondary" type="button">Refresh</button>
+            </div>
+            <div id="locationsList" class="list"></div>
+          </section>
+        </div>
+      </section>
+
+      <section id="inboxPanel" class="panel">
+        <section class="card">
+          <div class="card-title">
+            <h2>Inbox notifications</h2>
+            <button id="loadNotificationsButton" class="secondary" type="button">Refresh</button>
+          </div>
+          <div id="notificationsList" class="list"></div>
+        </section>
+      </section>
+    </main>
+
+    <aside id="message" class="message" role="status"></aside>
+    <script src="/app.js"></script>
+  </body>
+</html>
