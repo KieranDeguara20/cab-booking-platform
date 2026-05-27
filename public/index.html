@@ -14,6 +14,7 @@
         </div>
       </div>
       <div class="session">
+        <span id="apiStatus" class="api-status">Checking API...</span>
         <span id="sessionStatus">Signed out</span>
         <button id="logoutButton" class="secondary" type="button">Logout</button>
       </div>
@@ -147,6 +148,7 @@
     </main>
 
     <aside id="message" class="message" role="status"></aside>
+    <div id="loadingOverlay" class="loading-overlay" aria-live="polite">Processing request...</div>
     <script src="/app.js"></script>
   </body>
 </html>

@@ -6,6 +6,9 @@ const state = {
 
 const message = document.querySelector("#message");
 const sessionStatus = document.querySelector("#sessionStatus");
+const apiStatus = document.querySelector("#apiStatus");
+const loadingOverlay = document.querySelector("#loadingOverlay");
+let activeRequests = 0;
 
 function showMessage(text) {
   message.textContent = text;
@@ -19,6 +22,30 @@ function updateSession() {
     : state.token
       ? "Signed in"
       : "Signed out";
+}
+
+function setLoading(isLoading) {
+  activeRequests += isLoading ? 1 : -1;
+  activeRequests = Math.max(activeRequests, 0);
+  loadingOverlay.classList.toggle("visible", activeRequests > 0);
+
+  document.querySelectorAll("button").forEach((button) => {
+    button.disabled = activeRequests > 0;
+  });
+}
+
+async function parseJsonResponse(response) {
+  const text = await response.text();
+
+  if (!text) {
+    return {};
+  }
+
+  try {
+    return JSON.parse(text);
+  } catch (error) {
+    throw new Error("The server returned an invalid JSON response.");
+  }
 }
 
 function formDataToObject(form) {
@@ -40,18 +67,48 @@ async function gateway(path, options = {}) {
     headers.Authorization = `Bearer ${state.token}`;
   }
 
-  const response = await fetch(`/api/gateway${path}`, {
-    method: options.method || "GET",
-    headers,
-    body: options.body ? JSON.stringify(options.body) : undefined,
-  });
-  const payload = await response.json();
+  let response;
+  let payload;
+
+  setLoading(true);
+
+  try {
+    response = await fetch(`/api/gateway${path}`, {
+      method: options.method || "GET",
+      headers,
+      body: options.body ? JSON.stringify(options.body) : undefined,
+    });
+    payload = await parseJsonResponse(response);
+  } catch (error) {
+    throw new Error("Could not reach the online service. Try again after a few seconds.");
+  } finally {
+    setLoading(false);
+  }
 
   if (!response.ok) {
     throw new Error(payload.data?.message || payload.message || "Request failed.");
   }
 
   return payload.data;
+}
+
+async function checkApiStatus() {
+  try {
+    const response = await fetch("/health");
+    const data = await parseJsonResponse(response);
+
+    if (!response.ok || data.status !== "ok") {
+      throw new Error("Health check failed.");
+    }
+
+    apiStatus.textContent = "API online";
+    apiStatus.classList.remove("offline");
+    apiStatus.classList.add("online");
+  } catch (error) {
+    apiStatus.textContent = "API waking up";
+    apiStatus.classList.remove("online");
+    apiStatus.classList.add("offline");
+  }
 }
 
 function renderJson(elementId, data) {
@@ -315,6 +372,7 @@ document.querySelector("#loadNotificationsButton").addEventListener("click", () 
 });
 
 updateSession();
+checkApiStatus();
 if (state.token) {
   loadProfile().catch(() => updateSession());
 }

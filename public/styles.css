@@ -69,6 +69,25 @@ h2 {
   gap: 12px;
 }
 
+.api-status {
+  color: #111827;
+  background: #e5e7eb;
+  border-radius: 999px;
+  padding: 6px 10px;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.api-status.online {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.api-status.offline {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
 .layout {
   width: min(1180px, calc(100% - 32px));
   margin: 24px auto;
@@ -105,6 +124,11 @@ button {
 button.secondary {
   background: #ffffff;
   border-color: var(--border);
+}
+
+button:disabled {
+  cursor: wait;
+  opacity: 0.65;
 }
 
 .panel {
@@ -247,6 +271,23 @@ pre {
 .message.visible {
   opacity: 1;
   transform: translateY(0);
+}
+
+.loading-overlay {
+  position: fixed;
+  inset: auto 18px 72px auto;
+  display: none;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: #ffffff;
+  border: 1px solid var(--border);
+  box-shadow: 0 12px 30px rgba(17, 24, 39, 0.16);
+  color: var(--text);
+  font-weight: 700;
+}
+
+.loading-overlay.visible {
+  display: block;
 }
 
 @media (max-width: 760px) {
