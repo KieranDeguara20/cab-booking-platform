@@ -1232,6 +1232,24 @@ app.delete("/api/locations/:locationId", authenticateCustomer, async (req, res) 
   }
 });
 
+app.use("/api", (req, res) => {
+  res.status(404).json({
+    message: "API endpoint not found.",
+    path: req.originalUrl,
+  });
+});
+
+app.use((error, req, res, next) => {
+  if (res.headersSent) {
+    return next(error);
+  }
+
+  return res.status(500).json({
+    message: "Unexpected server error.",
+    error: error.message,
+  });
+});
+
 async function startServer() {
   if (!process.env.MONGODB_URI) {
     throw new Error("MONGODB_URI is missing. Add it to your .env file.");
