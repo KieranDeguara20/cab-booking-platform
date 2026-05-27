@@ -62,6 +62,10 @@ const customerSchema = new mongoose.Schema(
         },
       },
     ],
+    discountNotificationSent: {
+      type: Boolean,
+      default: false,
+    },
   },
   {
     timestamps: true,
@@ -74,6 +78,7 @@ customerSchema.methods.toSafeProfile = function toSafeProfile() {
     firstName: this.firstName,
     surname: this.surname,
     email: this.email,
+    discountNotificationSent: this.discountNotificationSent,
     createdAt: this.createdAt,
     updatedAt: this.updatedAt,
   };
@@ -410,6 +415,37 @@ async function customerCanUseDiscount(customerId) {
   });
 
   return successfulPayments >= 3;
+}
+
+async function notifyDiscountAvailable(customerId) {
+  const successfulPayments = await Payment.countDocuments({
+    customerId,
+    status: "successful",
+  });
+
+  if (successfulPayments < 3) {
+    return null;
+  }
+
+  const customer = await Customer.findOne({
+    _id: customerId,
+    discountNotificationSent: { $ne: true },
+  });
+
+  if (!customer) {
+    return null;
+  }
+
+  customer.notifications.push({
+    title: "Discount available",
+    message: "You have completed three bookings. A discount is now available for your next ride.",
+    type: "discount",
+  });
+  customer.discountNotificationSent = true;
+
+  await customer.save();
+
+  return customer.notifications[customer.notifications.length - 1];
 }
 
 function buildLocationQuery(location) {
@@ -869,10 +905,13 @@ app.post("/api/payments", authenticateCustomer, async (req, res) => {
     booking.paymentStatus = "paid";
     await booking.save();
 
+    const discountNotification = await notifyDiscountAvailable(req.customer._id);
+
     return res.status(201).json({
       message: "Payment processed successfully.",
       payment: payment.toPaymentDetails(),
       booking: booking.toBookingDetails(),
+      discountNotification,
     });
   } catch (error) {
     return res.status(500).json({
